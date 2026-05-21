@@ -32,26 +32,22 @@ brew install ffmpeg sox hamlib
 ```
 cp .env.example .env       # then fill in the values
 npm install
-npm run audio:devices      # list avfoundation audio inputs to pick one
-npm run rig:devices        # list serial ports to pick one for RIG_PORT
-npm run audio:test         # smoke test the audio capture pipeline
-npm run rig:test           # smoke test rig control (interactive — type `freq <MHz>` / `mode <NAME>`)
-npm run listen:test        # full pipeline: capture + transcribe + rig metadata
+npm run devices            # list audio inputs (for AUDIO_DEVICE) and serial ports (for RIG_PORT)
+npm run dev                # full pipeline via tsx watch (dev loop)
+npm run build && npm start # full pipeline from compiled output (dist/)
 ```
 
 The FT-991 enumerates as two USB-serial devices; pick the right one for `RIG_PORT`. See "FT-991 specifics" below.
 
 ## How to verify a change
 
-There is no automated test suite. Verify changes by running the smoke scripts in `src/scripts/`:
+There is no automated test suite. Verify changes by:
 
-- **typecheck** — `npm run build` runs `tsc` purely as a typechecker. There's no compiled artifact in the dev loop; everything else runs via `tsx`.
-- **audio capture** — `npm run audio:test`
-- **transcription** — `npm run transcribe:test`
-- **rig control** — `npm run rig:test` (interactive)
-- **full pipeline** — `npm run listen:test`
+- **typecheck / build** — `npm run build` runs `tsc`, emitting JS to `dist/`. Use it to catch type errors; `npm start` runs the compiled output.
+- **dev loop** — `npm run dev` runs `src/main.ts` directly via `tsx watch`, restarting on file changes.
+- **full pipeline** — either `npm run dev` or `npm run build && npm start`: connects to the rig, iterates `listen(rig)`, and prints each `Transcript`.
 
-Audio and rig tests need real hardware connected. If you can't run the relevant smoke script, say so — don't claim a change is verified.
+The full pipeline needs real hardware connected (rig + audio). If you can't run it, say so — don't claim a change is verified.
 
 ## File layout
 
@@ -68,7 +64,8 @@ src/
     bands.ts           Band enum + bandFor(frequency)
     modes.ts           Mode enum mirroring hamlib's mode strings
   config.ts            dotenv-loaded config
-  scripts/             smoke-test scripts wired to npm run targets
+  main.ts              entrypoint — connects rig, iterates listen(rig), prints transcripts
+  scripts/             setup-time discovery utilities (devices)
 captures/              session output, one timestamped subdir per run (gitignored)
 ```
 
@@ -95,7 +92,8 @@ A persistent ffmpeg with per-utterance spawned sox processes failed: subsequent 
 
 ### FT-991 specifics
 
-- The rig enumerates as two USB-serial devices (Silicon Labs CP210x). Convention: the lower-numbered (`-0`) suffix is typically the Enhanced / CAT port; the higher (`-1`) is the Standard / RTS-for-PTT port. Confirm via `npm run rig:devices` + trial. The CAT port is what `RIG_PORT` needs.
+- The rig enumerates as two USB-serial devices (Silicon Labs CP210x). Convention: the lower-numbered (`-0`) suffix is typically the Enhanced / CAT port; the higher (`-1`) is the Standard / RTS-for-PTT port. Confirm via `npm run devices` + trial. The CAT port is what `RIG_PORT` needs.
+- On macOS, always use the `/dev/cu.*` (call-up) path, never `/dev/tty.*` — opening a tty device blocks until DCD is asserted, which the rig never does. `SerialPort.list()` reports tty paths; the `devices` script translates them to cu paths.
 - AI (Auto-Information) mode is unreliable on the FT-991 — the rig doesn't broadcast unsolicited state changes when the VFO is turned. We poll explicitly (every 100 ms) instead of subscribing.
 - The rig's built-in soundcard is a separate USB audio device, unrelated to either serial port. List it with `npm run audio:devices`.
 

@@ -1,20 +1,16 @@
 {
   "name": "ham-buddy",
   "version": "1.0.0",
-  "description": "An agent the listens, learns, and acts over ham radio.",
+  "description": "An agent that listens, learns, and acts over ham radio.",
   "author": "Guy Royse <guy@guy.dev>",
   "license": "MIT",
   "private": true,
   "type": "module",
-  "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "audio:devices": "tsx src/scripts/audio-devices.ts",
-    "audio:test": "tsx src/scripts/audio-test.ts",
-    "transcribe:test": "tsx src/scripts/transcribe-test.ts",
-    "rig:test": "tsx src/scripts/rig-test.ts",
-    "rig:devices": "tsx src/scripts/rig-devices.ts",
-    "listen:test": "tsx src/scripts/listen-test.ts"
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts",
+    "devices": "tsx src/scripts/devices.ts"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",
