@@ -4,16 +4,17 @@ Ham-buddy is an agent that controls a Yaesu FT-991 ham radio, listens to its rec
 
 ## Stack
 
-| Concern       | Choice                                                              | Status  |
-| ------------- | ------------------------------------------------------------------- | ------- |
-| Runtime       | Node 24, TypeScript (ESM), `tsx` to run                             | done    |
-| Audio capture | `ffmpeg \| sox` shell pipeline, sox segments on silence             | done    |
-| STT           | OpenAI Whisper API + gpt-4o-mini correction pass                    | done    |
-| Listener      | `listen()` async generator combining capture + transcribe + rig tag | done    |
-| Radio         | Yaesu FT-991 via hamlib's `rigctld` (spawned subprocess + TCP)      | done    |
-| Memory        | Redis Agent Memory REST API (private preview)                       | not yet |
-| Agent         | LangGraph.js + OpenAI                                               | not yet |
-| UI            | Ink TUI                                                             | not yet |
+| Concern               | Choice                                                              | Status  |
+| --------------------- | ------------------------------------------------------------------- | ------- |
+| Runtime               | Node 24, TypeScript (ESM), `tsx` to run                             | done    |
+| Audio capture         | `ffmpeg \| sox` shell pipeline, sox segments on silence             | done    |
+| STT                   | OpenAI Whisper API + gpt-4o-mini correction pass                    | done    |
+| Listener              | `listen()` async generator combining capture + transcribe + rig tag | done    |
+| Radio                 | Yaesu FT-991 via hamlib's `rigctld` (spawned subprocess + TCP)      | done    |
+| Structured extraction | JSON-schema `gpt-4o-mini` → `{text, callsigns, sender, recipient}`  | not yet |
+| Memory                | Redis Agent Memory REST API (private preview)                       | not yet |
+| Agent                 | LangGraph.js + OpenAI                                               | not yet |
+| UI                    | Ink TUI                                                             | not yet |
 
 ## External tools required
 
@@ -29,7 +30,7 @@ brew install ffmpeg sox hamlib
 ## Setup
 
 ```
-cp .env.example .env       # then fill in OpenAI key, RIG_PORT, RIG_MODEL, etc.
+cp .env.example .env       # then fill in the values
 npm install
 npm run audio:devices      # list avfoundation audio inputs to pick one
 npm run rig:devices        # list serial ports to pick one for RIG_PORT
@@ -38,57 +39,37 @@ npm run rig:test           # smoke test rig control (interactive — type `freq 
 npm run listen:test        # full pipeline: capture + transcribe + rig metadata
 ```
 
+The FT-991 enumerates as two USB-serial devices; pick the right one for `RIG_PORT`. See "FT-991 specifics" below.
+
+## How to verify a change
+
+There is no automated test suite. Verify changes by running the smoke scripts in `src/scripts/`:
+
+- **typecheck** — `npm run build` runs `tsc` purely as a typechecker. There's no compiled artifact in the dev loop; everything else runs via `tsx`.
+- **audio capture** — `npm run audio:test`
+- **transcription** — `npm run transcribe:test`
+- **rig control** — `npm run rig:test` (interactive)
+- **full pipeline** — `npm run listen:test`
+
+Audio and rig tests need real hardware connected. If you can't run the relevant smoke script, say so — don't claim a change is verified.
+
 ## File layout
 
 ```
 src/
   capture/
-    capture.sh       bash pipeline: ffmpeg captures raw PCM (s16le, 16 kHz mono)
-                     from avfoundation, pipes to sox which segments on silence
-                     via the silence effect + :newfile :restart chain.
-    capture.ts       async generator wrapper: spawns capture.sh, watches the
-                     session directory, yields WAV paths as sox closes each take.
-                     Reads device + outputDir from config.
-    transcribe.ts    transcribe(wavPath): Whisper-1 transcription with ham-vocab
-                     prompt biasing, then a gpt-4o-mini cleanup pass with a
-                     longer ham-vocab system prompt and JSON-free output.
-                     Returns the corrected text. Reads OpenAI key from config.
-    listen.ts        listen(rig): async generator yielding Transcript
-                     {text, audioPath, capturedAt, frequency, mode, band} for
-                     each utterance. Snapshots rig state at WAV-close time
-                     (before transcription, which can take seconds). Owns an
-                     internal AbortController so callers don't pass a signal.
+    capture.sh         bash pipeline: ffmpeg → sox, segments on silence
+    capture.ts         async generator wrapping capture.sh; yields WAV paths
+    transcribe.ts      Whisper transcription + gpt-4o-mini correction pass
+    listen.ts          joins capture + transcribe + rig snapshot → Transcript stream
   rig/
-    rig.ts           Rig class. Holds frequency / mode / band, polls rigctld
-                     every 100 ms via two queries (+f, +m). Public API:
-                     static connect() / close() / get+set frequency / get+set
-                     mode / get band. Reads port/baud/model from config.
-    rigctld-socket.ts  RigCtlD_Socket. Spawns rigctld as a child process and
-                     speaks its line-based TCP protocol. Public API: send(),
-                     readLine(), close(). Transactions serialize via an
-                     internal chain — send() awaits its turn, and readLine()
-                     releases the chain when it sees the RPRT terminator.
-                     Callers prefix commands with `+` to guarantee RPRT
-                     termination.
-    bands.ts         Band enum + bandFor(frequency) — derives the ham band
-                     from a Hz value. The FT-991A has no read-side band
-                     query, so we infer band from frequency.
-    modes.ts         Mode enum whose values are hamlib's mode strings (USB,
-                     LSB, CW, FM, AM, RTTY, PKTLSB, PKTUSB, etc.). Both sent
-                     to and received from rigctld verbatim.
-  config.ts          dotenv-loaded config. Exposes openai.apiKey,
-                     memory.{host, apiKey, storeId}, rig.{port, baud, model},
-                     audio.{device, outputDir}. Required-but-missing vars are
-                     surfaced at the call site (e.g. Rig.connect throws if
-                     RIG_PORT is empty).
-  scripts/
-    audio-devices.ts    `npm run audio:devices`   — list avfoundation audio inputs
-    audio-test.ts       `npm run audio:test`      — print each captured WAV path
-    transcribe-test.ts  `npm run transcribe:test` — capture + transcribe each utterance
-    rig-devices.ts      `npm run rig:devices`     — list serial ports + manufacturer info
-    rig-test.ts         `npm run rig:test`        — interactive REPL: set freq/mode + live state
-    listen-test.ts      `npm run listen:test`     — capture + transcribe + rig-state, print each Transcript
-captures/            session output, one timestamped subdirectory per run (gitignored)
+    rig.ts             Rig class — polls rigctld, exposes freq/mode/band
+    rigctld-socket.ts  spawns rigctld, speaks its line-based TCP protocol
+    bands.ts           Band enum + bandFor(frequency)
+    modes.ts           Mode enum mirroring hamlib's mode strings
+  config.ts            dotenv-loaded config
+  scripts/             smoke-test scripts wired to npm run targets
+captures/              session output, one timestamped subdir per run (gitignored)
 ```
 
 ## Runtime data flow
@@ -110,11 +91,13 @@ One long-lived bash pipeline. ffmpeg streams raw PCM (s16le, 16 kHz mono — mat
 
 ### Why a bash pipeline instead of two Node-spawned processes?
 
-We tried one persistent ffmpeg piped to many spawned sox processes (one per utterance). After the first take, subsequent sox processes mysteriously saw EOF on stdin after ~80 ms with no clear cause — extensive diagnosis (event listeners on the source stream, manual byte forwarding, sox `-V3`) showed sox cleanly consumed a small burst and exited, but nothing in our code was closing the pipe. Sox's own `:newfile :restart` chain sidesteps the whole problem: one sox process for the whole session, segmentation handled internally.
+A persistent ffmpeg with per-utterance spawned sox processes failed: subsequent sox processes saw EOF on stdin ~80 ms in, with no clear cause. Sox's own `:newfile :restart` chain sidesteps the problem — one sox process owns the whole session, segmentation is internal.
 
-### Signal handling in `capture.sh`
+### FT-991 specifics
 
-Bash doesn't forward signals to a foreground pipeline by default. The script installs a `trap` that kills the whole job group on `EXIT`/`INT`/`TERM` so ffmpeg + sox die cleanly when Node aborts.
+- The rig enumerates as two USB-serial devices (Silicon Labs CP210x). Convention: the lower-numbered (`-0`) suffix is typically the Enhanced / CAT port; the higher (`-1`) is the Standard / RTS-for-PTT port. Confirm via `npm run rig:devices` + trial. The CAT port is what `RIG_PORT` needs.
+- AI (Auto-Information) mode is unreliable on the FT-991 — the rig doesn't broadcast unsolicited state changes when the VFO is turned. We poll explicitly (every 100 ms) instead of subscribing.
+- The rig's built-in soundcard is a separate USB audio device, unrelated to either serial port. List it with `npm run audio:devices`.
 
 ### Why rigctld instead of node-serialport?
 
@@ -136,23 +119,21 @@ The protocol is one command per line. Commands prefixed with `+` get extended/la
 
 `RigCtlD_Socket` serializes transactions through an internal chain: `send()` awaits any prior in-flight transaction, writes the command, and remembers the chain-release callback. `readLine()` returns lines as they arrive; when it sees one starting with `RPRT`, it releases the chain so the next `send()` can proceed. Callers _must_ read until `RPRT` for each `send()` or the chain stays locked.
 
-### FT-991 specifics
-
-- The rig enumerates as two USB-serial devices (Silicon Labs CP210x). Convention: the lower-numbered (`-0`) suffix is typically the Enhanced / CAT port; the higher (`-1`) is the Standard / RTS-for-PTT port. Confirm via `npm run rig:devices` + trial.
-- AI (Auto-Information) mode is unreliable on the FT-991 — the rig doesn't broadcast unsolicited state changes when the VFO is turned. We poll explicitly (every 100 ms) instead of subscribing.
-- The rig's built-in soundcard is a separate USB audio device, unrelated to either serial port. List it with `npm run audio:devices`.
-
 ## TypeScript style
 
 - **Top-down function order**: exported / main function first, helpers below. Function declarations hoist, so this works without forward-reference issues.
 - **`function foo()` declarations** for named module-level functions, not `const foo = () => ...`. Arrow functions are fine inline for callbacks.
 - **Full words for variable names**, not abbreviations or single letters: `frequency` not `hz`, `mode` not `m`, `megahertz` not `mhz`, `command` not `cmd`, `previousLine` not `last`. Trivial loop indices can stay short.
+- **NodeNext ESM imports**: local imports use the `.js` extension even though the source file is `.ts` (`import { foo } from './foo.js'`). Don't "fix" these.
+- **Logging**: errors are logged inline via `console.error` at the call site (see Rig methods). No external logger; don't add one without a reason.
 - Strict mode is on; no `any` cheats.
 - Default to no comments. Add `/* ... */` only when the _why_ isn't obvious from the code (e.g. protocol notes, ordering invariants). Don't write JSDoc / docstrings.
 
 ## What's next
 
+Expands each "not yet" row from the Stack table above, in order:
+
 1. **Structured extraction** — replace the cleanup pass in `transcribe.ts` with a JSON-schema `gpt-4o-mini` call returning `{ text, callsigns, sender, recipient }` so transcripts become queryable by entity. The `Transcript` type in `listen.ts` then grows to carry that structure.
-2. **Redis Agent Memory REST client** — POST each `Transcript` (from `listen()`) to `/v1/stores/{storeId}/session-memory`, recall via `/long-term-memory/search`. Auth: `Bearer <API_KEY>`. Env vars: `MEMORY_API_HOST`, `MEMORY_API_KEY`, `MEMORY_STORE_ID`.
-3. **LangGraph agent** — chat agent with tools: `setFrequency`, `setMode`, `getRigStatus`, `recallMemory`, `searchTranscripts`. This is where the natural-language frequency parsing ("tune to 14.250 USB" → `rig.frequency = 14_250_000; rig.mode = Mode.USB`) lives.
-4. **Ink TUI** — single-process app combining the listener loop, the chat agent, and three panes: chat / live transcripts / rig status.
+2. **Memory** — Redis Agent Memory REST client. POST each `Transcript` (from `listen()`) to `/v1/stores/{storeId}/session-memory`, recall via `/long-term-memory/search`. Auth: `Bearer <API_KEY>`. Env vars `MEMORY_API_HOST` / `MEMORY_API_KEY` / `MEMORY_STORE_ID` are already wired through `config.ts`.
+3. **Agent** — LangGraph chat agent with tools: `setFrequency`, `setMode`, `getRigStatus`, `recallMemory`, `searchTranscripts`. This is where the natural-language frequency parsing ("tune to 14.250 USB" → `rig.frequency = 14_250_000; rig.mode = Mode.USB`) lives.
+4. **UI** — Ink TUI. Single-process app combining the listener loop, the chat agent, and three panes: chat / live transcripts / rig status.

@@ -11,8 +11,8 @@ export const config = {
   },
   rig: {
     port: env('RIG_PORT'),
-    baud: Number(env('RIG_BAUD', '38400')),
-    model: Number(env('RIG_MODEL', '1035'))
+    baud: Number(env('RIG_BAUD')),
+    model: Number(env('RIG_MODEL'))
   },
   audio: {
     device: env('AUDIO_DEVICE', '0'),
