@@ -1,20 +1,20 @@
 # AGENTS.md
 
-Ham-buddy is an agent that controls a Yaesu FT-991 ham radio, listens to its received audio, transcribes what it hears, stores transcripts in agent memory, and answers questions about what was said on the air.
+Ham-buddy is an agent that controls a Yaesu FT-991 ham radio, listens to its received audio, transcribes what it hears, enriches each transmission with structured fields, stores the result in agent memory, and answers questions about what was said on the air.
 
 ## Stack
 
-| Concern               | Choice                                                              | Status  |
-| --------------------- | ------------------------------------------------------------------- | ------- |
-| Runtime               | Node 24, TypeScript (ESM), `tsx` to run                             | done    |
-| Audio capture         | `ffmpeg \| sox` shell pipeline, sox segments on silence             | done    |
-| STT                   | OpenAI Whisper API + gpt-4o-mini correction pass                    | done    |
-| Listener              | `listen()` async generator combining capture + transcribe + rig tag | done    |
-| Radio                 | Yaesu FT-991 via hamlib's `rigctld` (spawned subprocess + TCP)      | done    |
-| Structured extraction | JSON-schema `gpt-4o-mini` → `{text, callsigns, sender, recipient}`  | not yet |
-| Memory                | Redis Agent Memory REST API (private preview)                       | not yet |
-| Agent                 | LangGraph.js + OpenAI                                               | not yet |
-| UI                    | Ink TUI                                                             | not yet |
+| Concern               | Choice                                                                                       | Status  |
+| --------------------- | -------------------------------------------------------------------------------------------- | ------- |
+| Runtime               | Node 24, TypeScript (ESM), `tsx` to run                                                      | done    |
+| Audio capture         | `ffmpeg \| sox` shell pipeline, sox segments on silence                                      | done    |
+| STT                   | OpenAI Whisper API (raw — cleanup moved to the enricher graph)                               | done    |
+| Listener              | `listen()` async generator combining capture + transcribe + rig tag                          | done    |
+| Radio                 | Yaesu FT-991 via hamlib's `rigctld` (spawned subprocess + TCP)                               | done    |
+| Enricher              | LangGraph.js workflow: correction → fan-out to NER / callsigns+roles / frequencies (gpt-4o-mini, strict JSON schema via Zod) | done    |
+| Memory                | Redis Agent Memory REST API (private preview)                                                | not yet |
+| Chatbot               | LangGraph.js chat agent with rig-control + memory-query tools                                | not yet |
+| UI                    | Ink TUI                                                                                      | not yet |
 
 ## External tools required
 
@@ -43,9 +43,9 @@ The FT-991 enumerates as two USB-serial devices; pick the right one for `RIG_POR
 
 There is no automated test suite. Verify changes by:
 
-- **typecheck / build** — `npm run build` runs `tsc`, emitting JS to `dist/`. Use it to catch type errors; `npm start` runs the compiled output.
-- **dev loop** — `npm run dev` runs `src/main.ts` directly via `tsx watch`, restarting on file changes.
-- **full pipeline** — either `npm run dev` or `npm run build && npm start`: connects to the rig, iterates `listen(rig)`, and prints each `Transcript`.
+- **typecheck / build** — `npm run build` runs `tsc && tsc-alias -f`, emitting JS to `dist/`. The `tsc-alias` step rewrites the TypeScript path aliases (`@capture/...` etc.) into relative paths Node ESM can resolve, and appends `.js` extensions. Use it to catch type errors; `npm start` runs the compiled output.
+- **dev loop** — `npm run dev` runs `src/main.ts` directly via `tsx watch`, restarting on file changes. tsx resolves path aliases natively.
+- **full pipeline** — either `npm run dev` or `npm run build && npm start`: connects to the rig, iterates `listen(rig)`, feeds each transcript through `enrichTransmission`, and prints each `EnrichedTransmission`.
 
 The full pipeline needs real hardware connected (rig + audio). If you can't run it, say so — don't claim a change is verified.
 
@@ -56,33 +56,46 @@ src/
   capture/
     capture.sh         bash pipeline: ffmpeg → sox, segments on silence
     capture.ts         async generator wrapping capture.sh; yields WAV paths
-    transcribe.ts      Whisper transcription + gpt-4o-mini correction pass
+    transcribe.ts      OpenAI Whisper transcription (raw output)
     listen.ts          joins capture + transcribe + rig snapshot → Transcript stream
+  config/
+    config.ts          dotenv-loaded config
+  enricher/
+    enricher.ts        entry point: enrichTransmission(input) → EnrichedTransmission
+    graph.ts           LangGraph StateGraph wiring (correct → fan out → end)
+    state.ts           EnricherStateAnnotation + EnricherState type
+    nodes/
+      text-corrector.ts             ham-aware cleanup of Whisper output
+      named-entities-extractor.ts   people, places, organizations
+      callsigns-extractor.ts        callsigns + sender/receiver/mentioned roles
+      frequencies-extractor.ts      frequencies mentioned in text → Hz
+  models/
+    models.ts          fetchChatModel() (ChatOpenAI) + fetchSpeechToTextModel() (OpenAI); cached
   rig/
     rig.ts             Rig class — polls rigctld, exposes freq/mode/band
     rigctld-socket.ts  spawns rigctld, speaks its line-based TCP protocol
     bands.ts           Band enum + bandFor(frequency)
     modes.ts           Mode enum mirroring hamlib's mode strings
-  config.ts            dotenv-loaded config
-  main.ts              entrypoint — connects rig, iterates listen(rig), prints transcripts
+  main.ts              entrypoint — connects rig, iterates listen(rig), enriches, prints
   scripts/             setup-time discovery utilities (devices)
 captures/              session output, one timestamped subdir per run (gitignored)
 ```
 
 ## Runtime data flow
 
-Two pipelines that meet in `listen()`:
+Three stages, met in `main.ts`:
 
-- **Audio**: `capture.sh` (long-lived ffmpeg | sox) → `captureUtterances()` yields WAV paths → `transcribe(path)` returns cleaned text.
+- **Capture + transcribe**: `capture.sh` (long-lived ffmpeg | sox) → `captureUtterances()` yields WAV paths → `transcribe(path)` returns raw Whisper text → `listen(rig)` bundles each into a `Transcript` with a rig-state snapshot.
 - **Rig**: `Rig.connect()` spawns `rigctld` and opens a TCP socket via `RigCtlD_Socket` → `Rig` polls `+f` and `+m` every 100 ms, keeping `frequency` / `mode` / `band` fresh on the instance.
+- **Enrich**: `main.ts` feeds each `Transcript` into `enrichTransmission(input)` from `@enricher/enricher`, which runs the LangGraph workflow and returns an `EnrichedTransmission` (raw + corrected text + entities + callsigns + frequencies mentioned + the input metadata).
 
-`listen(rig)` is the join: for each WAV path from `captureUtterances`, snapshot `rig.frequency`/`rig.mode`/`rig.band` immediately (before the slow transcribe call), then await `transcribe()`, then `yield` a `Transcript` with all of that bundled. Consumers do `for await (const transcript of listen(rig))`.
+`listen(rig)` is the capture/rig join: for each WAV path from `captureUtterances`, snapshot `rig.frequency`/`rig.mode`/`rig.band` immediately (before the slow transcribe call), then await `transcribe()`, then `yield` a `Transcript`. Consumers do `for await (const transcript of listen(rig))`.
 
 ## Architecture notes
 
 ### Audio capture
 
-One long-lived bash pipeline. ffmpeg streams raw PCM (s16le, 16 kHz mono — matches Whisper's internal input rate, no point sampling higher) to sox, which uses the `silence` effect with `:newfile :restart` to write one WAV per take. Each session creates its own timestamped subdirectory under `captures/`. Sox auto-numbers files within it (`utterance.wav`, `utterance001.wav`, ...).
+One long-lived bash pipeline. ffmpeg streams raw PCM (s16le, 16 kHz mono — matches Whisper's internal input rate, no point sampling higher) to sox, which uses the `silence` effect with `:newfile :restart` to write one WAV per take. Each session creates its own timestamped subdirectory under `captures/`. Sox auto-numbers files within it (`utterance-001.wav`, `utterance-002.wav`, ...).
 
 `captureUtterances()` is an async generator. It yields a WAV path _when the next file is opened_ — that's when sox has just closed the previous one, so it's safe to read. The in-progress file at abort time is never yielded (it's empty: sox is sitting in skip-silence mode waiting for the next take).
 
@@ -90,12 +103,22 @@ One long-lived bash pipeline. ffmpeg streams raw PCM (s16le, 16 kHz mono — mat
 
 A persistent ffmpeg with per-utterance spawned sox processes failed: subsequent sox processes saw EOF on stdin ~80 ms in, with no clear cause. Sox's own `:newfile :restart` chain sidesteps the problem — one sox process owns the whole session, segmentation is internal.
 
+### Enricher graph
+
+The enricher is a LangGraph `StateGraph` defined in `src/enricher/graph.ts`. State is declared once in `state.ts` (`EnricherStateAnnotation`) and carries only the fields nodes read or write: `rawText`, `correctedText`, `entities`, `callsigns`, `frequenciesMentioned`. Each node takes `EnricherState` and returns `Partial<EnricherState>`.
+
+Topology: `START → text-corrector → { named-entities-extractor, callsigns-extractor, frequencies-extractor } → END`. The three extractors run in parallel; LangGraph waits for all of them before terminating.
+
+`enrichTransmission()` in `enricher.ts` is the invocation layer: it invokes the compiled graph with just `{ rawText }`, then composes the final `EnrichedTransmission` by spreading the rig metadata from the input alongside the graph's output. The rig metadata never enters the graph — it's orthogonal to the graph's concern.
+
+Each extractor node owns its Zod schema and its inferred type (`Callsigns`, `FrequencyMention`, `NamedEntities`). `state.ts` imports those types. Extractors use `chat().withStructuredOutput(Schema, { strict: true })` so OpenAI's decoder is constrained to produce schema-valid output.
+
 ### FT-991 specifics
 
 - The rig enumerates as two USB-serial devices (Silicon Labs CP210x). Convention: the lower-numbered (`-0`) suffix is typically the Enhanced / CAT port; the higher (`-1`) is the Standard / RTS-for-PTT port. Confirm via `npm run devices` + trial. The CAT port is what `RIG_PORT` needs.
 - On macOS, always use the `/dev/cu.*` (call-up) path, never `/dev/tty.*` — opening a tty device blocks until DCD is asserted, which the rig never does. `SerialPort.list()` reports tty paths; the `devices` script translates them to cu paths.
 - AI (Auto-Information) mode is unreliable on the FT-991 — the rig doesn't broadcast unsolicited state changes when the VFO is turned. We poll explicitly (every 100 ms) instead of subscribing.
-- The rig's built-in soundcard is a separate USB audio device, unrelated to either serial port. List it with `npm run audio:devices`.
+- The rig's built-in soundcard is a separate USB audio device, unrelated to either serial port. List it with `npm run devices`.
 
 ### Why rigctld instead of node-serialport?
 
@@ -120,18 +143,19 @@ The protocol is one command per line. Commands prefixed with `+` get extended/la
 ## TypeScript style
 
 - **Top-down function order**: exported / main function first, helpers below. Function declarations hoist, so this works without forward-reference issues.
+- **Constants first, then functions**: module-level data (prompts, schemas, cached singletons) lives above the function declarations that use it. See `capture/transcribe.ts` and the enricher node files for the pattern.
 - **`function foo()` declarations** for named module-level functions, not `const foo = () => ...`. Arrow functions are fine inline for callbacks.
 - **Full words for variable names**, not abbreviations or single letters: `frequency` not `hz`, `mode` not `m`, `megahertz` not `mhz`, `command` not `cmd`, `previousLine` not `last`. Trivial loop indices can stay short.
-- **NodeNext ESM imports**: local imports use the `.js` extension even though the source file is `.ts` (`import { foo } from './foo.js'`). Don't "fix" these.
+- **Path aliases**: cross-folder imports use `@capture/...`, `@config/...`, `@enricher/...`, `@models/...`, `@rig/...` rather than `../../foo.js`. Same-folder imports stay relative (`./foo.js`). The aliases are configured in `tsconfig.json` paths; `tsc-alias -f` rewrites them to relative `.js` specifiers at build time. `tsx` (dev) resolves them natively.
+- **Imports omit the `.js` extension on aliased paths** (`'@models/models'`), but keep it on relative paths (`'./state.js'`) — required because we use `moduleResolution: bundler` for permissive typecheck, and tsc-alias adds the extension at emit time for Node ESM compatibility.
 - **Logging**: errors are logged inline via `console.error` at the call site (see Rig methods). No external logger; don't add one without a reason.
-- Strict mode is on; no `any` cheats.
+- Strict mode is on; no `any` cheats (with one deliberate exception in `enricher/graph.ts` where LangGraph's chained builder type is awkward).
 - Default to no comments. Add `/* ... */` only when the _why_ isn't obvious from the code (e.g. protocol notes, ordering invariants). Don't write JSDoc / docstrings.
 
 ## What's next
 
-Expands each "not yet" row from the Stack table above, in order:
+Remaining "not yet" rows from the Stack table, in order:
 
-1. **Structured extraction** — replace the cleanup pass in `transcribe.ts` with a JSON-schema `gpt-4o-mini` call returning `{ text, callsigns, sender, recipient }` so transcripts become queryable by entity. The `Transcript` type in `listen.ts` then grows to carry that structure.
-2. **Memory** — Redis Agent Memory REST client. POST each `Transcript` (from `listen()`) to `/v1/stores/{storeId}/session-memory`, recall via `/long-term-memory/search`. Auth: `Bearer <API_KEY>`. Env vars `MEMORY_API_HOST` / `MEMORY_API_KEY` / `MEMORY_STORE_ID` are already wired through `config.ts`.
-3. **Agent** — LangGraph chat agent with tools: `setFrequency`, `setMode`, `getRigStatus`, `recallMemory`, `searchTranscripts`. This is where the natural-language frequency parsing ("tune to 14.250 USB" → `rig.frequency = 14_250_000; rig.mode = Mode.USB`) lives.
-4. **UI** — Ink TUI. Single-process app combining the listener loop, the chat agent, and three panes: chat / live transcripts / rig status.
+1. **Memory** — Redis Agent Memory REST client. POST each `EnrichedTransmission` (from `enrichTransmission()`) to `/v1/stores/{storeId}/session-memory`, recall via `/long-term-memory/search`. Auth: `Bearer <API_KEY>`. Env vars `MEMORY_API_HOST` / `MEMORY_API_KEY` / `MEMORY_STORE_ID` are already wired through `config.ts`.
+2. **Chatbot** — LangGraph chat agent with tools: `setFrequency`, `setMode`, `getRigStatus`, `recallMemory`, `searchTranscripts`. This is where the natural-language frequency parsing ("tune to 14.250 USB" → `rig.frequency = 14_250_000; rig.mode = Mode.USB`) lives. Lives at `src/chatbot/` as a peer to `src/enricher/`.
+3. **UI** — Ink TUI. Single-process app combining the listener loop, the chat agent, and three panes: chat / live transcripts / rig status.

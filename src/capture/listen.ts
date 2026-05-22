@@ -1,6 +1,6 @@
-import { Rig } from '../rig/rig.js'
-import { Band } from '../rig/bands.js'
-import { Mode } from '../rig/modes.js'
+import { Rig } from '@rig/rig'
+import { Band } from '@rig/bands'
+import { Mode } from '@rig/modes'
 import { captureUtterances } from './capture.js'
 import { transcribe } from './transcribe.js'
 

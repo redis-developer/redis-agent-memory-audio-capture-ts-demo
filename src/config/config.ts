@@ -23,7 +23,7 @@ export const config = {
 export type Config = typeof config
 
 function env(name: string, fallback?: string): string {
-  const v = process.env[name]
-  if (v !== undefined && v !== '') return v
+  const value = process.env[name]
+  if (value !== undefined && value !== '') return value
   return fallback ?? ''
 }

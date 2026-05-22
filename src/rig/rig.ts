@@ -1,4 +1,5 @@
-import { config } from '../config.js'
+import { config } from '@config/config'
+
 import { Band, bandFor } from './bands.js'
 import { Mode } from './modes.js'
 import { RigCtlD_Socket } from './rigctld-socket.js'

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, watch } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { config } from '../config.js'
+import { config } from '@config/config'
 
 const SCRIPT_PATH = fileURLToPath(new URL('./capture.sh', import.meta.url))
 
@@ -37,7 +37,7 @@ export async function* captureUtterances(signal: AbortSignal): AsyncIterableIter
       /* Ignore anything not a .wav file */
       if (!event.filename?.endsWith('.wav')) continue
 
-      /* We've found a new file, so yield it */
+      /* We've found a new file, so yield the previous one (it's now closed) */
       const newFile = resolve(join(sessionFolder, event.filename))
       if (currentFile && currentFile !== newFile) yield currentFile
       currentFile = newFile
