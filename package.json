@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc && tsc-alias -f",
     "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx src/main.ts",
     "devices": "tsx src/scripts/devices.ts"
   },
   "devDependencies": {

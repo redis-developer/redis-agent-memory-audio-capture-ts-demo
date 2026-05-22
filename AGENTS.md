@@ -33,7 +33,7 @@ brew install ffmpeg sox hamlib
 cp .env.example .env       # then fill in the values
 npm install
 npm run devices            # list audio inputs (for AUDIO_DEVICE) and serial ports (for RIG_PORT)
-npm run dev                # full pipeline via tsx watch (dev loop)
+npm run dev                # full pipeline via tsx (dev loop)
 npm run build && npm start # full pipeline from compiled output (dist/)
 ```
 
@@ -44,7 +44,7 @@ The FT-991 enumerates as two USB-serial devices; pick the right one for `RIG_POR
 There is no automated test suite. Verify changes by:
 
 - **typecheck / build** — `npm run build` runs `tsc && tsc-alias -f`, emitting JS to `dist/`. The `tsc-alias` step rewrites the TypeScript path aliases (`@capture/...` etc.) into relative paths Node ESM can resolve, and appends `.js` extensions. Use it to catch type errors; `npm start` runs the compiled output.
-- **dev loop** — `npm run dev` runs `src/main.ts` directly via `tsx watch`, restarting on file changes. tsx resolves path aliases natively.
+- **dev loop** — `npm run dev` runs `src/main.ts` directly via `tsx`. tsx resolves path aliases natively. (Run as a one-shot, not in watch mode — the chat REPL reads stdin, which `tsx watch` intercepts.)
 - **full pipeline** — either `npm run dev` or `npm run build && npm start`: connects to the rig, iterates `listen(rig)`, feeds each transcript through `enrichTransmission`, and prints each `EnrichedTransmission`.
 
 The full pipeline needs real hardware connected (rig + audio). If you can't run it, say so — don't claim a change is verified.

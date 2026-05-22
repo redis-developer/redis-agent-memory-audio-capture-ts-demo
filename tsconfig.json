@@ -20,6 +20,7 @@
     "rootDir": "./src",
     "paths": {
       "@capture/*": ["./src/capture/*"],
+      "@chatbot/*": ["./src/chatbot/*"],
       "@config/*": ["./src/config/*"],
       "@models/*": ["./src/models/*"],
       "@rig/*": ["./src/rig/*"],

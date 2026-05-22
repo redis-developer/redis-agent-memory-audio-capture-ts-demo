@@ -1,6 +1,8 @@
-import { listen } from '@capture/listen'
+import { createInterface } from 'node:readline/promises'
+
 import { Rig } from '@rig/rig'
-import { enrichTransmission, EnrichedTransmission } from '@enricher/enricher'
+
+import { chat } from './chat.js'
 
 const rig = await Rig.connect()
 
@@ -10,58 +12,19 @@ process.on('SIGINT', () => {
   process.exit(0)
 })
 
-console.log('listening — Ctrl+C to stop\n')
+const repl = createInterface({ input: process.stdin, output: process.stdout })
+
+console.log('ham-buddy chat — Ctrl+C to stop\n')
 
 try {
-  for await (const transcript of listen(rig)) {
-    const enriched = await enrichTransmission({
-      text: transcript.text,
-      receivedAt: transcript.capturedAt,
-      frequency: transcript.frequency,
-      mode: transcript.mode,
-      band: transcript.band
-    })
-    printEnriched(enriched, transcript.audioPath)
+  while (true) {
+    const message = (await repl.question('> ')).trim()
+    if (message === '') continue
+    const reply = await chat(rig, message)
+    console.log(reply + '\n')
   }
 } catch (err) {
   console.error('error:', (err as Error).message)
+  rig.close()
   process.exit(1)
-}
-
-function printEnriched(enriched: EnrichedTransmission, audioPath: string): void {
-  const frequency = enriched.frequency !== null ? `${(enriched.frequency / 1_000_000).toFixed(6)} MHz` : '—'
-  const mode = enriched.mode ?? '—'
-  const band = enriched.band ?? '—'
-  const receivedAt = enriched.receivedAt.toISOString()
-
-  console.log(`[${receivedAt}]`)
-  console.log(`  frequency: ${frequency}`)
-  console.log(`  mode:      ${mode}`)
-  console.log(`  band:      ${band}`)
-  console.log(`  audio:     ${audioPath}`)
-  console.log(`  raw:       ${enriched.text}`)
-  console.log(`  text:      ${enriched.correctedText}`)
-  console.log(`  sender:    ${enriched.callsigns.sender ?? '—'}`)
-  console.log(`  receiver:  ${enriched.callsigns.receiver ?? '—'}`)
-  if (enriched.callsigns.mentioned.length > 0) {
-    console.log(`  mentioned: ${enriched.callsigns.mentioned.join(', ')}`)
-  }
-  if (enriched.entities.people.length > 0) {
-    console.log(`  people:    ${enriched.entities.people.join(', ')}`)
-  }
-  if (enriched.entities.places.length > 0) {
-    console.log(`  places:    ${enriched.entities.places.join(', ')}`)
-  }
-  if (enriched.entities.organizations.length > 0) {
-    console.log(`  orgs:      ${enriched.entities.organizations.join(', ')}`)
-  }
-  if (enriched.frequenciesMentioned.length > 0) {
-    const list = enriched.frequenciesMentioned
-      .map(mention =>
-        mention.hz !== null ? `${mention.raw} (${(mention.hz / 1_000_000).toFixed(6)} MHz)` : mention.raw
-      )
-      .join(', ')
-    console.log(`  freqs:     ${list}`)
-  }
-  console.log('')
 }
