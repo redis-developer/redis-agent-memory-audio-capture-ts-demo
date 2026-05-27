@@ -1,43 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "esnext",
-    "lib": ["ES2022"],
-    "types": ["node"],
-    "skipLibCheck": true,
-    "verbatimModuleSyntax": false,
-
-    /* Node.js mode */
-    "moduleResolution": "bundler",
-    "moduleDetection": "force",
-    "isolatedModules": true,
-    "forceConsistentCasingInFileNames": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-
-    /* Build output */
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "paths": {
-      "@capture/*": ["./src/capture/*"],
-      "@chatbot/*": ["./src/chatbot/*"],
-      "@config/*": ["./src/config/*"],
-      "@models/*": ["./src/models/*"],
-      "@rig/*": ["./src/rig/*"],
-      "@enricher/*": ["./src/enricher/*"],
-      "@memory/*": ["./src/memory/*"]
-    },
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
-  },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/radio-listener" },
+    { "path": "./packages/chatbot" }
+  ]
 }

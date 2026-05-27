@@ -1,21 +1,24 @@
 {
-  "name": "ham-buddy",
+  "name": "earshot",
   "version": "1.0.0",
-  "description": "An agent that listens, learns, and acts over ham radio.",
+  "description": "Earshot is a multi-agent demo of Redis Agent Memory: agents ingest, transcribe, curate, and recall audio from various ambient sources, stored as long-term memories.",
   "author": "Guy Royse <guy@guy.dev>",
   "license": "MIT",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsc && tsc-alias -f",
-    "start": "node dist/main.js",
-    "dev": "tsx src/main.ts",
-    "devices": "tsx src/scripts/devices.ts"
+    "build": "tsc -b && tsc-alias -f -p packages/shared/tsconfig.json && tsc-alias -f -p packages/radio-listener/tsconfig.json && tsc-alias -f -p packages/chatbot/tsconfig.json",
+    "chat": "tsx --tsconfig packages/chatbot/tsconfig.json packages/chatbot/src/main.ts",
+    "listen": "tsx --tsconfig packages/radio-listener/tsconfig.json packages/radio-listener/src/main.ts",
+    "devices": "tsx scripts/devices.ts"
   },
   "devDependencies": {
-    "@types/node": "^25.8.0",
+    "@types/node": "^25.9.1",
     "tsc-alias": "^1.8.17",
-    "tsx": "^4.22.0",
+    "tsx": "^4.22.3",
     "typescript": "^6.0.3"
   },
   "dependencies": {
@@ -24,9 +27,9 @@
     "@langchain/openai": "^1.4.7",
     "@redis-iris/agent-memory": "0.0.5",
     "dedent": "^1.7.2",
-    "dotenv": "^16.6.1",
+    "dotenv": "^17.4.2",
     "langchain": "^1.4.2",
-    "openai": "^6.38.0",
+    "openai": "^6.39.0",
     "redis": "^5.12.1",
     "serialport": "^13.0.0",
     "ulid": "^3.0.2",

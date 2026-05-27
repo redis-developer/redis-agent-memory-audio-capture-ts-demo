@@ -1,6 +1,8 @@
 # AGENTS.md
 
-Ham-buddy is an agent that controls a Yaesu FT-991 ham radio, listens to its received audio, transcribes what it hears, enriches each transmission with structured fields, stores the result in agent memory, and answers questions about what was said on the air.
+Earshot is a multi-agent demo of Redis Agent Memory: agents ingest, transcribe, curate, and recall audio from various ambient sources, stored as long-term memories. The first implemented audio source is a Yaesu FT-991 amateur radio; the architecture is meant to extend to other sources.
+
+> **NOTE:** This document is significantly out of date relative to the current workspace layout (`packages/shared`, `packages/radio-listener`, `packages/chatbot`) and naming (chatbot tool surface is `searchTranscripts` only — no rig control; nodes renamed `memory-using-responder` / `session-event-saver`). Treat the sections below as historical context pending a refresh.
 
 ## Stack
 
@@ -132,13 +134,13 @@ The text-corrector's system prompt optionally gets a "Local context" block appen
 
 ### Chatbot graph
 
-`src/chatbot/` mirrors the enricher's layout: `chatbot.ts` (entry: `chat(message)`), `graph.ts`, `state.ts`, `nodes/`, `tools/`. State is a custom `Annotation.Root` with five named fields — `sessionId`, `username`, `userMessage`, `promptMessages`, `responseMessage` — NOT `MessagesAnnotation`. The shape was lifted from `guyroyse/ai-news-agent`'s chatbot workflow, which uses the same Redis Agent Memory recall/respond/save pattern; `username` is a ham-buddy addition so the caller threads identity into the workflow.
+`src/chatbot/` mirrors the enricher's layout: `chatbot.ts` (entry: `chat(message)`), `graph.ts`, `state.ts`, `nodes/`, `tools/`. State is a custom `Annotation.Root` with five named fields — `sessionId`, `username`, `userMessage`, `promptMessages`, `responseMessage` — NOT `MessagesAnnotation`. The shape was lifted from `guyroyse/ai-news-agent`'s chatbot workflow, which uses the same Redis Agent Memory recall/respond/save pattern; `username` is an Earshot addition so the caller threads identity into the workflow.
 
 Topology is three nodes: `START → prompt-enricher → radio-using-responder → memory-saver → END`.
 
 - **prompt-enricher** (`nodes/prompt-enricher.ts`): reads `sessionId` from state, calls `agentMemory.getSessionMemory(sessionId)`, maps `SessionEvent[]` to `BaseMessage[]` (`USER` → `HumanMessage`, `ASSISTANT` → `AIMessage`, `SYSTEM` → `SystemMessage`), appends the current `userMessage` as a `HumanMessage`, returns `{ promptMessages }`. A 404 on the first turn of a new session is caught and treated as empty history.
 - **radio-using-responder** (`nodes/radio-using-responder.ts`): holds the `createAgent` instance (from the `langchain` package — not the deprecated `createReactAgent` from `@langchain/langgraph/prebuilt`) at module scope. Invokes it with `{ messages: state.promptMessages }`, extracts the final message's string content, returns `{ responseMessage }`. See "Why a node wrapper instead of adding the agent as a node directly" below.
-- **memory-saver** (`nodes/memory-saver.ts`): writes two `addSessionEvent` calls — `actorId: state.username` + `role: 'USER'` for the input, then `actorId: 'ham-buddy'` + `role: 'ASSISTANT'` for the reply. The first user turn's actorId becomes the session's permanent `ownerId` (set by the service from the actorId of the first event), so the user's name doubles as the session owner — useful as a search filter later. Tool-call messages from the agent's internal loop are NOT persisted; only the user input and the final assistant text. The closed `MessageRole` enum (`USER | ASSISTANT | SYSTEM`) doesn't include `TOOL`, so faithful tool-dance replay isn't an option without serializing into `metadata`.
+- **memory-saver** (`nodes/memory-saver.ts`): writes two `addSessionEvent` calls — `actorId: state.username` + `role: 'USER'` for the input, then `actorId: 'earshot'` + `role: 'ASSISTANT'` for the reply. The first user turn's actorId becomes the session's permanent `ownerId` (set by the service from the actorId of the first event), so the user's name doubles as the session owner — useful as a search filter later. Tool-call messages from the agent's internal loop are NOT persisted; only the user input and the final assistant text. The closed `MessageRole` enum (`USER | ASSISTANT | SYSTEM`) doesn't include `TOOL`, so faithful tool-dance replay isn't an option without serializing into `metadata`.
 
 `chat(message, username)` imports the `sessionId` from `@memory/client` and invokes the graph with `{ sessionId, username, userMessage: message }`. Returns `finalState.responseMessage`. `main.ts` sources `username` from `config.user.name` (env var `USER_NAME`, defaults to `'operator'`) — set it to your callsign to get per-callsign filtering on future long-term-memory recall.
 

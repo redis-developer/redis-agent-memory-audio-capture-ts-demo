@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@chatbot/*": ["./src/chatbot/*"],
+      "@config/*": ["./src/config/*"],
+      "@memory/*": ["./src/memory/*"],
+      "@models/*": ["./src/models/*"]
+    }
+  },
+  "references": [{ "path": "../shared" }],
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
