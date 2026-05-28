@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/shared" },
     { "path": "./packages/radio-listener" },
+    { "path": "./packages/mic-listener" },
     { "path": "./packages/chatbot" }
   ]
 }

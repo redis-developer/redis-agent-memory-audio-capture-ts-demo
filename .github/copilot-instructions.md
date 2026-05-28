@@ -1,26 +1,27 @@
 # AGENTS.md
 
-Earshot is a multi-agent demo of Redis Agent Memory: agents ingest, transcribe, curate, and recall audio from various ambient sources, stored as long-term memories. The first implemented audio source is a Yaesu FT-991 amateur radio; the architecture is meant to extend to other sources.
+Earshot is a multi-agent demo of Redis Agent Memory: agents ingest, transcribe, curate, and recall audio from various ambient sources, stored as long-term memories. The implemented audio sources are a Yaesu FT-991 amateur radio and a generic microphone; the architecture is meant to extend to other sources.
 
 The directory on disk is still `ham-buddy/` (the project's working title before it was renamed to Earshot). The directory name is legacy and not the project's identity — don't rename it without coordinating, because doing so dissociates Claude Code's session memory.
 
 ## Architecture at a glance
 
-Two independent Node processes share a single Redis Agent Memory store:
+Three independent Node processes share a single Redis Agent Memory store:
 
-- **radio-listener** (`packages/radio-listener`) — captures audio from the rig, transcribes it, enriches with structured fields, formats a prose description, and writes each transmission as a long-term memory. Owns `rigctld` and the audio capture pipeline.
+- **radio-listener** (`packages/radio-listener`) — captures audio from the rig, transcribes it, enriches with structured fields (including callsigns and frequencies), formats a prose description, and writes each transmission as a long-term memory. Owns `rigctld` and the audio capture pipeline.
+- **mic-listener** (`packages/mic-listener`) — same shape as the radio listener but stripped of the radio-domain bits: no rig, no callsign/frequency extraction, and a generic-English text corrector. Reads from a plain microphone and writes each captured utterance as a long-term memory under its own owner id by default (`'earshot-mic-listener'`).
 - **chatbot** (`packages/chatbot`) — REPL that talks to the user. Pulls preference memories at each turn, calls `searchTranscripts` when the user asks about something heard, persists each turn as session events.
 
 They never communicate directly. All coordination happens through the shared Agent Memory store. Each process can run alone; the architecture supports multiple of either in theory.
 
-A third process — a curator agent — is a planned extension (see "What's next") but is **not implemented**. Today the listener writes every utterance directly to long-term memory.
+A curator agent — between the listeners and long-term memory — is a planned extension (see "What's next") but is **not implemented**. Today both listeners write every utterance directly to long-term memory.
 
 ## Stack
 
 | Concern               | Choice                                                                            | Status   |
 | --------------------- | --------------------------------------------------------------------------------- | -------- |
 | Runtime               | Node 24, TypeScript (ESM), `tsx` to run                                           | done     |
-| Workspace             | npm workspaces — three packages: `@earshot/shared`, `@earshot/radio-listener`, `@earshot/chatbot` | done |
+| Workspace             | npm workspaces — four packages: `@earshot/shared`, `@earshot/radio-listener`, `@earshot/mic-listener`, `@earshot/chatbot` | done |
 | Audio capture         | `ffmpeg \| sox` shell pipeline, sox segments on silence — in shared               | done     |
 | STT                   | OpenAI Whisper API, no prompt — domain cleanup happens downstream in the enricher | done     |
 | Radio                 | Yaesu FT-991 via hamlib's `rigctld` (spawned subprocess + TCP)                    | done     |
@@ -51,6 +52,7 @@ npm install
 npm run devices            # list audio inputs (for AUDIO_DEVICE) and serial ports (for RIG_PORT)
 npm run chat               # chat REPL via tsx (no rig or audio needed)
 npm run listen             # radio capture + enrich + store loop (needs rig + audio)
+npm run mic-listen         # mic capture + enrich + store loop (needs audio only)
 npm run build              # tsc -b + per-package tsc-alias
 ```
 
@@ -63,8 +65,9 @@ There is no automated test suite. Verify changes by:
 - **typecheck / build** — `npm run build` runs `tsc -b` then `tsc-alias -f` per workspace package. Use it to catch type errors. Each package emits to its own `dist/` directory; the per-package `tsc-alias` step rewrites path aliases into `.js`-suffixed relative paths Node ESM can resolve.
 - **chatbot smoke test** — `npm run chat` boots the REPL and prints `Earshot Chat Bot — Ctrl+C to stop\n` followed by the colored `<callsign>> ` prompt. The chatbot doesn't need the rig or audio; it just needs OpenAI and Agent Memory credentials. Stops cleanly on Ctrl+C or piped-EOF on stdin.
 - **radio-listener smoke test** — `npm run listen` connects the rig (via `Rig.connect()`) then enters the ingest loop. Needs the rig powered + connected via USB, and audio routed from the rig's sound card. Each utterance prints the formatted prose to stdout and writes it to long-term memory.
+- **mic-listener smoke test** — `npm run mic-listen` enters the ingest loop directly (no hardware setup). Needs an audio input device set via `AUDIO_DEVICE`. Each utterance prints the formatted prose to stdout and writes it to long-term memory.
 
-Both production sides need real hardware. If you can't run them, say so — don't claim a change is verified.
+Both listener sides need real audio input. If you can't run them, say so — don't claim a change is verified.
 
 ## File layout
 
@@ -106,6 +109,28 @@ packages/
         bands.ts           Band enum + bandFor(frequency)
         modes.ts           Mode enum mirroring hamlib's mode strings
       main.ts              entrypoint — connects rig, runs ingest()
+    package.json
+    tsconfig.json
+  mic-listener/
+    src/
+      config/
+        config.ts          dotenv-loaded config (openai, memory, audio, listenerOwnerId — defaults to 'earshot-mic-listener')
+      enricher/
+        enricher.ts        entry: enrichRecording(input) → EnrichedRecording
+        graph.ts           LangGraph StateGraph wiring (correct → entities → end)
+        state.ts           EnrichmentStateAnnotation + EnrichmentState type
+        nodes/
+          text-corrector.ts             generic-English cleanup of Whisper output
+          named-entities-extractor.ts   people, places, organizations
+      ingest/
+        ingest.ts          ingest() loop + logRecording + storeMemory
+        recordings.ts      captureRecordings() async generator + CapturedRecording type (no rig metadata)
+        format.ts          formatRecording() — prose builder
+      memory/
+        client.ts          configured AgentMemory SDK instance
+      models/
+        models.ts          fetchChatModel() (ChatOpenAI); cached
+      main.ts              entrypoint — runs ingest()
     package.json
     tsconfig.json
   chatbot/
@@ -160,13 +185,14 @@ The chatbot has no awareness of the rig or capture pipeline. The listener has no
 
 ### Workspace structure
 
-Three packages under `packages/`:
+Four packages under `packages/`:
 
 - **`@earshot/shared`** — domain-agnostic audio capture + transcription. The only library that's meant to be reused across listener variants. Owns its own OpenAI client (reads `OPENAI_API_KEY` from env).
 - **`@earshot/radio-listener`** — the radio-specific listener. Owns `rigctld`, the rig client, the enricher, and the ingest loop. Has its own copy of `config/`, `memory/`, `models/`.
+- **`@earshot/mic-listener`** — the generic-microphone listener. Same overall shape as the radio listener but without `rig/`, without the callsign and frequency extractor nodes, and with a domain-agnostic text-corrector prompt. Has its own copy of `config/`, `memory/`, `models/`.
 - **`@earshot/chatbot`** — the conversational REPL. Has its own copy of `config/`, `memory/`, `models/`.
 
-Each app has its own `memory/client.ts`, `models/models.ts`, and `config/config.ts` rather than sharing a single utility package. That's a deliberate demo-friendliness call — each app reads as self-contained when you walk the slide deck. The cost is mild duplication; both `listenerOwnerId` defaults, both `MEMORY_*` env keys, etc. must stay in sync.
+Each app has its own `memory/client.ts`, `models/models.ts`, and `config/config.ts` rather than sharing a single utility package. That's a deliberate demo-friendliness call — each app reads as self-contained when you walk the slide deck. The cost is mild duplication; the `MEMORY_*` env keys and the audio capture defaults must stay in sync across listeners. The two listeners default to distinct `listenerOwnerId`s (`'earshot-listener'` vs `'earshot-mic-listener'`) so their writes don't collide; setting `LISTENER_OWNER_ID` in `.env` overrides both to the same value.
 
 Path aliases (`@config/*`, `@memory/*`, `@models/*`, `@rig/*`, `@enricher/*`, `@chatbot/*`) are configured **per-package** in each `tsconfig.json` — they point inside the same package. Cross-package imports use the workspace package name (e.g. `@earshot/shared`).
 
@@ -308,5 +334,7 @@ Behavior worth knowing, mostly empirical:
    - **Listener** stops calling `bulkCreateLongTermMemories` directly; instead `XADD`s each enriched transmission to a Redis Stream (`earshot:transmissions` or similar).
    - **Curator** is an LLM-driven agent (`createAgent` + tools) that consumes the stream via `XREADGROUP`, decides per-transmission whether to skip / promote as-is / batch related transmissions into a summary memory, and writes curated content to long-term memory.
    - **Chatbot** is unchanged — still queries long-term memory via `searchTranscripts`. It just sees curated content instead of raw transcripts.
-2. **Non-radio listeners** — the shared package is domain-agnostic now. A `packages/mic-listener/` or `packages/websdr-listener/` would import shared, provide its own metadata snapshotter, and its own enricher tuned to its domain. Worth doing as soon as a peer wants to demo without a radio.
-3. **TUI** — Ink TUI was previously planned (single-process app combining ingest + chat + status panes), but the two-process split made it complicated (would need IPC to show live transcripts in the chatbot UI). Deferred indefinitely; both apps stay CLI-only for now.
+2. **More non-radio listeners** — `packages/mic-listener/` is the first non-radio listener and shows the pattern. Future listeners (`packages/websdr-listener/`, room-mic variants, etc.) would import shared, provide their own metadata snapshotter where applicable, and their own enricher tuned to their domain.
+
+3. **Chatbot sees only the radio listener's writes by default.** The chatbot's `searchTranscripts` tool filters long-term memory by a single `listenerOwnerId` (defaulting to `'earshot-listener'`). Mic-listener memories default to `'earshot-mic-listener'` so they don't appear in chatbot recall unless either (a) the user sets `LISTENER_OWNER_ID` to the same value across all processes, or (b) the chatbot is updated to filter with `ownerId: { in: [...] }` over multiple ids. Decide based on whether you want the chatbot to treat both sources as one corpus.
+4. **TUI** — Ink TUI was previously planned (single-process app combining ingest + chat + status panes), but the multi-process split made it complicated (would need IPC to show live transcripts in the chatbot UI). Deferred indefinitely; all apps stay CLI-only for now.

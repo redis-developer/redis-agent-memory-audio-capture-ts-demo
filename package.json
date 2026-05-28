@@ -10,9 +10,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b && tsc-alias -f -p packages/shared/tsconfig.json && tsc-alias -f -p packages/radio-listener/tsconfig.json && tsc-alias -f -p packages/chatbot/tsconfig.json",
+    "build": "tsc -b && tsc-alias -f -p packages/shared/tsconfig.json && tsc-alias -f -p packages/radio-listener/tsconfig.json && tsc-alias -f -p packages/mic-listener/tsconfig.json && tsc-alias -f -p packages/chatbot/tsconfig.json",
     "chat": "tsx --tsconfig packages/chatbot/tsconfig.json packages/chatbot/src/main.ts",
     "listen": "tsx --tsconfig packages/radio-listener/tsconfig.json packages/radio-listener/src/main.ts",
+    "mic-listen": "tsx --tsconfig packages/mic-listener/tsconfig.json packages/mic-listener/src/main.ts",
     "devices": "tsx scripts/devices.ts"
   },
   "devDependencies": {
