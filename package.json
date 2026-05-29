@@ -10,7 +10,9 @@
     "packages/*"
   ],
   "scripts": {
+    "clean": "rm -rf packages/shared/dist packages/radio-listener/dist packages/mic-listener/dist packages/chatbot/dist packages/shared/tsconfig.tsbuildinfo packages/radio-listener/tsconfig.tsbuildinfo packages/mic-listener/tsconfig.tsbuildinfo packages/chatbot/tsconfig.tsbuildinfo",
     "build": "tsc -b && tsc-alias -f -p packages/shared/tsconfig.json && tsc-alias -f -p packages/radio-listener/tsconfig.json && tsc-alias -f -p packages/mic-listener/tsconfig.json && tsc-alias -f -p packages/chatbot/tsconfig.json && cp packages/shared/src/audio/capture.sh packages/shared/dist/audio/capture.sh",
+    "rebuild": "npm run clean && npm run build",
     "chat": "node packages/chatbot/dist/main.js",
     "chat:dev": "tsx --conditions=dev --tsconfig packages/chatbot/tsconfig.json packages/chatbot/src/main.ts",
     "radio-listen": "node packages/radio-listener/dist/main.js",
