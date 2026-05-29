@@ -1,6 +1,6 @@
 # Earshot
 
-Earshot is a multi-agent demo of [Redis Agent Memory](https://redis.io/). Independent listener processes capture audio from ambient sources, transcribe and enrich it, and write each utterance to long-term memory. A separate chatbot reads from that same memory store and answers questions about what was heard.
+Earshot is a multi-agent demo of [Redis Agent Memory](https://redis.io/agent-memory/). Independent listener processes capture audio from ambient sources, transcribe and enrich it, and write each utterance to long-term memory. A separate chatbot reads from that same memory store and answers questions about what was heard.
 
 The project ships with two listeners:
 
@@ -16,7 +16,7 @@ The three processes (`mic-listener`, `radio-listener`, `chatbot`) are independen
 - **Node.js 24** (see [.nvmrc](.nvmrc))
 - **ffmpeg** and **sox** — audio capture pipeline
 - **hamlib** — only needed for the radio-listener (provides `rigctld`)
-- A **Redis Agent Memory** store (host, store ID, API key)
+- A **Redis Agent Memory** store (host, store ID, API key) — [sign up free at redis.io/try-free](https://redis.io/try-free/)
 - An **OpenAI API key** — used for Whisper transcription and the chat / enricher models
 
 On macOS:
@@ -102,20 +102,20 @@ FT-991 specifics:
 
 See [.env.example](.env.example) for the complete list with comments. Summary:
 
-| Variable                  | Purpose                                                         |
-| ------------------------- | --------------------------------------------------------------- |
-| `MEMORY_API_HOST`         | Redis Agent Memory endpoint                                     |
-| `MEMORY_API_KEY`          | Redis Agent Memory API key                                      |
-| `MEMORY_STORE_ID`         | Redis Agent Memory store ID                                     |
-| `OPENAI_API_KEY`          | OpenAI key — Whisper + chat models                              |
-| `USER_NAME`               | Your identity in chatbot sessions                               |
-| `LISTENER_OWNER_ID`       | Optional — override the listener's default owner id             |
-| `AUDIO_DEVICE`            | Audio input device name or avfoundation index                   |
-| `AUDIO_OUTPUT_DIR`        | Where captured WAVs go (default `./captures`)                   |
-| `AUDIO_LOCATION_CONTEXT`  | Optional — free-form location hints to help correct transcripts |
-| `RIG_PORT`                | Serial port for `rigctld` (radio-listener only)                 |
-| `RIG_BAUD`                | Serial baud rate (radio-listener only)                          |
-| `RIG_MODEL`               | Hamlib rig model number — see `rigctl --list`                   |
+| Variable                 | Purpose                                                         |
+| ------------------------ | --------------------------------------------------------------- |
+| `MEMORY_API_HOST`        | Redis Agent Memory endpoint                                     |
+| `MEMORY_API_KEY`         | Redis Agent Memory API key                                      |
+| `MEMORY_STORE_ID`        | Redis Agent Memory store ID                                     |
+| `OPENAI_API_KEY`         | OpenAI key — Whisper + chat models                              |
+| `USER_NAME`              | Your identity in chatbot sessions                               |
+| `LISTENER_OWNER_ID`      | Optional — override the listener's default owner id             |
+| `AUDIO_DEVICE`           | Audio input device name or avfoundation index                   |
+| `AUDIO_OUTPUT_DIR`       | Where captured WAVs go (default `./captures`)                   |
+| `AUDIO_LOCATION_CONTEXT` | Optional — free-form location hints to help correct transcripts |
+| `RIG_PORT`               | Serial port for `rigctld` (radio-listener only)                 |
+| `RIG_BAUD`               | Serial baud rate (radio-listener only)                          |
+| `RIG_MODEL`              | Hamlib rig model number — see `rigctl --list`                   |
 
 ## Project layout
 
