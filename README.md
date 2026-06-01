@@ -10,7 +10,6 @@
 - [Setup](#setup)
 - [Running the Demo](#running-the-demo)
 - [Architecture](#architecture)
-- [Known Issues](#known-issues)
 - [Resources](#resources)
 - [Maintainers](#maintainers)
 - [License](#license)
