@@ -9,11 +9,11 @@ export const config = {
     apiKey: env('MEMORY_API_KEY'),
     storeId: env('MEMORY_STORE_ID')
   },
-  listenerOwnerId: env('LISTENER_OWNER_ID', 'earshot-mic-listener'),
+  listenerOwnerId: env('LISTENER_OWNER_ID', 'earshot-listener'),
   audio: {
-    device: env('AUDIO_DEVICE', '0'),
-    outputDir: env('AUDIO_OUTPUT_DIR', './captures'),
-    locationContext: env('AUDIO_LOCATION_CONTEXT', '')
+    device: env('MIC_AUDIO_DEVICE', '0'),
+    outputDir: env('MIC_AUDIO_OUTPUT_DIR', './captures/mic'),
+    locationContext: env('MIC_AUDIO_LOCATION_CONTEXT', '')
   }
 } as const
 

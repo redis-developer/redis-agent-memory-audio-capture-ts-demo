@@ -20,7 +20,7 @@ async function listAudioDevices(): Promise<void> {
   for (const device of devices) {
     console.log(`  [${device.index}] ${device.name}`)
   }
-  console.log('  → set AUDIO_DEVICE in .env to the index (e.g. "1") or the device name (e.g. "USB Audio CODEC")')
+  console.log('  → set MIC_AUDIO_DEVICE / RADIO_AUDIO_DEVICE in .env to the index (e.g. "1") or the device name (e.g. "USB Audio CODEC")')
 }
 
 async function listSerialPorts(): Promise<void> {

@@ -9,7 +9,7 @@ The directory on disk is still `ham-buddy/` (the project's working title before 
 Three independent Node processes share a single Redis Agent Memory store:
 
 - **radio-listener** (`packages/radio-listener`) — captures audio from the rig, transcribes it, enriches with structured fields (including callsigns and frequencies), formats a prose description, and writes each transmission as a long-term memory. Owns `rigctld` and the audio capture pipeline.
-- **mic-listener** (`packages/mic-listener`) — same shape as the radio listener but stripped of the radio-domain bits: no rig, no callsign/frequency extraction, and a generic-English text corrector. Reads from a plain microphone and writes each captured utterance as a long-term memory under its own owner id by default (`'earshot-mic-listener'`).
+- **mic-listener** (`packages/mic-listener`) — same shape as the radio listener but stripped of the radio-domain bits: no rig, no callsign/frequency extraction, and a generic-English text corrector. Reads from a plain microphone and writes each captured utterance as a long-term memory under the shared owner id (`'earshot-listener'` by default).
 - **chatbot** (`packages/chatbot`) — REPL that talks to the user. Pulls preference memories at each turn, calls `searchTranscripts` when the user asks about something heard, persists each turn as session events.
 
 They never communicate directly. All coordination happens through the shared Agent Memory store. Each process can run alone; the architecture supports multiple of either in theory.
@@ -49,7 +49,7 @@ brew install ffmpeg sox hamlib
 ```
 cp .env.example .env       # then fill in the values
 npm install
-npm run devices            # list audio inputs (for AUDIO_DEVICE) and serial ports (for RIG_PORT)
+npm run devices            # list audio inputs (for MIC_AUDIO_DEVICE / RADIO_AUDIO_DEVICE) and serial ports (for RIG_PORT)
 npm run chat               # chat REPL via tsx (no rig or audio needed)
 npm run listen             # radio capture + enrich + store loop (needs rig + audio)
 npm run mic-listen         # mic capture + enrich + store loop (needs audio only)
@@ -65,7 +65,7 @@ There is no automated test suite. Verify changes by:
 - **typecheck / build** — `npm run build` runs `tsc -b` then `tsc-alias -f` per workspace package. Use it to catch type errors. Each package emits to its own `dist/` directory; the per-package `tsc-alias` step rewrites path aliases into `.js`-suffixed relative paths Node ESM can resolve.
 - **chatbot smoke test** — `npm run chat` boots the REPL and prints `Earshot Chat Bot — Ctrl+C to stop\n` followed by the colored `<callsign>> ` prompt. The chatbot doesn't need the rig or audio; it just needs OpenAI and Agent Memory credentials. Stops cleanly on Ctrl+C or piped-EOF on stdin.
 - **radio-listener smoke test** — `npm run listen` connects the rig (via `Rig.connect()`) then enters the ingest loop. Needs the rig powered + connected via USB, and audio routed from the rig's sound card. Each utterance prints the formatted prose to stdout and writes it to long-term memory.
-- **mic-listener smoke test** — `npm run mic-listen` enters the ingest loop directly (no hardware setup). Needs an audio input device set via `AUDIO_DEVICE`. Each utterance prints the formatted prose to stdout and writes it to long-term memory.
+- **mic-listener smoke test** — `npm run mic-listen` enters the ingest loop directly (no hardware setup). Needs an audio input device set via `MIC_AUDIO_DEVICE`. Each utterance prints the formatted prose to stdout and writes it to long-term memory.
 
 Both listener sides need real audio input. If you can't run them, say so — don't claim a change is verified.
 
@@ -114,7 +114,7 @@ packages/
   mic-listener/
     src/
       config/
-        config.ts          dotenv-loaded config (openai, memory, audio, listenerOwnerId — defaults to 'earshot-mic-listener')
+        config.ts          dotenv-loaded config (openai, memory, audio, listenerOwnerId — defaults to 'earshot-listener')
       enricher/
         enricher.ts        entry: enrichRecording(input) → EnrichedRecording
         graph.ts           LangGraph StateGraph wiring (correct → entities → end)
@@ -156,7 +156,7 @@ packages/
     tsconfig.json
 scripts/
   devices.ts               setup-time utility — lists audio devices + serial ports
-captures/                  session output, one timestamped subdir per run (gitignored)
+captures/                  session output under mic/ and radio/, one timestamped subdir per run (gitignored)
 ```
 
 ## Runtime data flow
@@ -192,7 +192,7 @@ Four packages under `packages/`:
 - **`@earshot/mic-listener`** — the generic-microphone listener. Same overall shape as the radio listener but without `rig/`, without the callsign and frequency extractor nodes, and with a domain-agnostic text-corrector prompt. Has its own copy of `config/`, `memory/`, `models/`.
 - **`@earshot/chatbot`** — the conversational REPL. Has its own copy of `config/`, `memory/`, `models/`.
 
-Each app has its own `memory/client.ts`, `models/models.ts`, and `config/config.ts` rather than sharing a single utility package. That's a deliberate demo-friendliness call — each app reads as self-contained when you walk the slide deck. The cost is mild duplication; the `MEMORY_*` env keys and the audio capture defaults must stay in sync across listeners. The two listeners default to distinct `listenerOwnerId`s (`'earshot-listener'` vs `'earshot-mic-listener'`) so their writes don't collide; setting `LISTENER_OWNER_ID` in `.env` overrides both to the same value.
+Each app has its own `memory/client.ts`, `models/models.ts`, and `config/config.ts` rather than sharing a single utility package. That's a deliberate demo-friendliness call — each app reads as self-contained when you walk the slide deck. The cost is mild duplication; the `MEMORY_*` env keys must stay in sync across listeners, but each listener has its own audio config (`MIC_AUDIO_*` vs `RADIO_AUDIO_*`) so they can capture from separate sources at once. All three apps default `listenerOwnerId` to `'earshot-listener'` so the chatbot sees both listeners' writes out of the box; setting `LISTENER_OWNER_ID` in `.env` overrides all of them to a different shared value.
 
 Path aliases (`@config/*`, `@memory/*`, `@models/*`, `@rig/*`, `@enricher/*`, `@chatbot/*`) are configured **per-package** in each `tsconfig.json` — they point inside the same package. Cross-package imports use the workspace package name (e.g. `@earshot/shared`).
 
@@ -234,7 +234,7 @@ Topology: `START → text-corrector → { named-entities-extractor, callsigns-ex
 
 Each extractor node owns its Zod schema and its inferred type (`Callsigns`, `FrequencyMention`, `NamedEntities`). `state.ts` imports those types. Extractors use `chat().withStructuredOutput(Schema, { strict: true })` so OpenAI's decoder is constrained to produce schema-valid output.
 
-The text-corrector's system prompt optionally gets a "Local context" block appended at module load from `AUDIO_LOCATION_CONTEXT` (via `config.audio.locationContext`) — a free-form description of where the receiver sits, nearby towns, local repeaters, and clubs. Helps the corrector fix Whisper mistranscriptions of local proper nouns that ham vocabulary alone can't cover (e.g. "Canoa" → "Genoa Township"). Empty/unset means the prompt is the universal ham-jargon version only.
+The text-corrector's system prompt optionally gets a "Local context" block appended at module load from each listener's location-context env var (`MIC_AUDIO_LOCATION_CONTEXT` / `RADIO_AUDIO_LOCATION_CONTEXT`, via `config.audio.locationContext`) — a free-form description of where the receiver sits, nearby towns, local repeaters, and clubs. Helps the corrector fix Whisper mistranscriptions of local proper nouns that ham vocabulary alone can't cover (e.g. "Canoa" → "Genoa Township"). Empty/unset means the prompt is the universal ham-jargon version only.
 
 ### Chatbot graph
 
@@ -336,5 +336,5 @@ Behavior worth knowing, mostly empirical:
    - **Chatbot** is unchanged — still queries long-term memory via `searchTranscripts`. It just sees curated content instead of raw transcripts.
 2. **More non-radio listeners** — `packages/mic-listener/` is the first non-radio listener and shows the pattern. Future listeners (`packages/websdr-listener/`, room-mic variants, etc.) would import shared, provide their own metadata snapshotter where applicable, and their own enricher tuned to their domain.
 
-3. **Chatbot sees only the radio listener's writes by default.** The chatbot's `searchTranscripts` tool filters long-term memory by a single `listenerOwnerId` (defaulting to `'earshot-listener'`). Mic-listener memories default to `'earshot-mic-listener'` so they don't appear in chatbot recall unless either (a) the user sets `LISTENER_OWNER_ID` to the same value across all processes, or (b) the chatbot is updated to filter with `ownerId: { in: [...] }` over multiple ids. Decide based on whether you want the chatbot to treat both sources as one corpus.
+3. **Single shared owner id.** The chatbot's `searchTranscripts` tool filters long-term memory by a single `listenerOwnerId`, and all three apps default it to `'earshot-listener'` so the chatbot treats both listeners' writes as one corpus. If you ever want to scope listeners under distinct owners and still have the chatbot see all of them, update the tool to filter with `ownerId: { in: [...] }` over multiple ids.
 4. **TUI** — Ink TUI was previously planned (single-process app combining ingest + chat + status panes), but the multi-process split made it complicated (would need IPC to show live transcripts in the chatbot UI). Deferred indefinitely; all apps stay CLI-only for now.

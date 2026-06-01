@@ -11,9 +11,9 @@ export const config = {
   },
   listenerOwnerId: env('LISTENER_OWNER_ID', 'earshot-listener'),
   audio: {
-    device: env('AUDIO_DEVICE', '0'),
-    outputDir: env('AUDIO_OUTPUT_DIR', './captures'),
-    locationContext: env('AUDIO_LOCATION_CONTEXT', '')
+    device: env('RADIO_AUDIO_DEVICE', '0'),
+    outputDir: env('RADIO_AUDIO_OUTPUT_DIR', './captures/radio'),
+    locationContext: env('RADIO_AUDIO_LOCATION_CONTEXT', '')
   },
   rig: {
     port: env('RIG_PORT'),
