@@ -9,6 +9,7 @@
 - [Demo Objectives](#demo-objectives)
 - [Setup](#setup)
 - [Running the Demo](#running-the-demo)
+- [Slide Deck](#slide-deck)
 - [Architecture](#architecture)
 - [Resources](#resources)
 - [Maintainers](#maintainers)
@@ -130,6 +131,11 @@ FT-991a specifics:
 - The rig enumerates as **two** USB-serial devices. The CAT port is the one you want for `RIG_PORT`. `npm run devices` lists both — confirm by trial.
 - On macOS, use the `/dev/cu.*` path, not `/dev/tty.*`.
 
+## Slide Deck
+
+📁 [Earshot Slide Deck](assets/earshot-slides.pdf)
+Covers the demo objectives, the multi-agent listener/chatbot architecture, and how Redis Agent Memory coordinates the independent processes.
+
 ## Architecture
 
 Audio is captured by one or more independent listener processes, transcribed with Whisper, enriched with OpenAI, and written to Redis Agent Memory as long-term memories. The chatbot runs separately and answers questions by semantically searching those same memories — the listeners and chatbot share no state except the Redis store.
@@ -143,89 +149,7 @@ The three processes (`mic-listener`, `radio-listener`, `chatbot`) are independen
 
 > If you don't own a radio, you can still run the full demo using the mic-listener and chatbot. The radio-listener is optional.
 
-```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'background': '#163341',
-    'primaryColor': '#1F4654',
-    'primaryTextColor': '#FFFFFF',
-    'primaryBorderColor': '#5A6D75',
-    'lineColor': '#FFFFFF',
-    'clusterBkg': '#0F2630',
-    'clusterBorder': '#5A6D75',
-    'titleColor': '#FFFFFF',
-    'fontFamily': 'Inter, system-ui, sans-serif'
-  },
-  'flowchart': {
-    'padding': 24,
-    'nodeSpacing': 40,
-    'rankSpacing': 60,
-    'subGraphTitleMargin': { 'top': 8, 'bottom': 24 }
-  }
-}}%%
-flowchart TD
-    USER("🤓 User")
-    RADIO("📻 Radio")
-    MIC("🎙️ Microphone")
-    REDIS[("Redis Database")]
-
-    subgraph CB["chatbot"]
-        direction TD
-        C1["prompt-enricher<br/>fetch prefs + history"]
-        C2["responder + tool<br/>searchTranscripts"]
-        C3["session-event-saver<br/>write user + assistant"]
-        C1 --> C2 --> C3
-    end
-
-    USER <--> CB
-
-    subgraph RL["radio-listener"]
-        direction TD
-        R1["Capture radio state<br/>rigctld"]
-        R2["Capture audio<br/>ffmpeg + sox"]
-        R3["Transcribe<br/>Whisper"]
-        R4["Enrich<br/>OpenAI"]
-        R1 --> R4
-        R2 --> R3 --> R4
-    end
-
-    RADIO --> RL
-
-    subgraph ML["mic-listener"]
-        direction TD
-        M1["Capture audio<br/>ffmpeg + sox"]
-        M2["Transcribe<br/>Whisper"]
-        M3["Enrich<br/>OpenAI"]
-        M1 --> M2 --> M3
-    end
-
-    MIC --> ML
-
-    subgraph RC["Redis Cloud"]
-        subgraph AM["Redis Agent Memory"]
-            direction RL
-            SES["sessions<br/>(chat history)"]
-            LT["long-term memories<br/>(transcripts + preferences)"]
-            SES -. auto-promote .-> LT
-        end
-        AM <--> REDIS
-    end
-
-
-    CB <-->|searchLongTermMemory<br/>getSessionMemory<br/>addSessionEvent| RC
-    RL -->|bulkCreateLongTermMemories| RC
-    ML -->|bulkCreateLongTermMemories| RC
-
-
-    classDef external fill:#DCFF1E,stroke:#DCFF1E,color:#163341,stroke-width:2px
-    classDef pipeline fill:#1F4654,stroke:#5A6D75,color:#FFFFFF
-    classDef memory fill:#FF4438,stroke:#FF4438,color:#FFFFFF,stroke-width:2px
-
-    class USER,RADIO,MIC external
-    class C1,C2,C3,R1,R2,R3,R4,M1,M2,M3 pipeline
-    class SES,LT,REDIS memory
-```
+![](assets/earshot-architecture.png)
 
 ## Resources
 
@@ -234,17 +158,6 @@ flowchart TD
 - [Redis Agent Skills](https://github.com/redis/agent-skills)
 - [hamlib / `rigctld`](https://hamlib.github.io/)
 - [OpenAI Whisper](https://platform.openai.com/docs/guides/speech-to-text)
-
-This application uses [Redis Iris](https://redis.io/iris).
-
-![Redis Iris](assets/redis-iris.svg)
-
-Additional Redis Iris product diagrams live in [assets/](assets/):
-
-- [Redis Agent Memory](assets/redis-agent-memory.png)
-- [Redis Context Retriever](assets/redis-context-retriever.png)
-- [Redis Data Integrator](assets/redis-data-integrator.png)
-- [LangCache](assets/redis-lang-cache.png)
 
 ## Maintainers
 
